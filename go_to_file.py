@@ -1,5 +1,5 @@
 import sublime, sublime_plugin
-import os, string
+import os, string, subprocess
 import re
 
 class GoToFile(sublime_plugin.TextCommand):
@@ -66,18 +66,45 @@ class GoToFile(sublime_plugin.TextCommand):
         close_quote = text.find(quote_character, position)
         return text[open_quote+1:close_quote] if (open_quote > 0 and close_quote > 0) else ''
 
+    @property
+    def envdct(self):
+        if "_envdct" not in dir(self) or not self._envdct:
+            var_frmt = re.compile("^(\w*)[\s=]*([\w/\.]*)\s*$")
+            varstr = str( subprocess.check_output(["zsh", "-li", "-c", "env"]), encoding='utf8' )
+            self._envdct = dict()
+            for line in varstr.split("\n"):
+                m = var_frmt.match(line)
+                if m:
+                    self._envdct[m.group(1)] = m.group(2)
+        return self._envdct
+
+    def handle_env_variables(self, text):
+        def repl(m):
+            var = m.group(1)
+            if var in self.envdct:
+                return self.envdct[var]
+            else:
+                return m.group(0)
+        pattern = re.compile("\$\(*(\w*)\)*")
+        return re.sub(pattern, repl, text)
 
     def get_filename(self, text):
         results = []
         text = text.replace('\\', os.sep).replace(os.sep+os.sep, os.sep).replace('import ', '').replace('use ', '').replace(';', '').strip()
+        text = self.handle_env_variables(text)
         print("get filename " + text)
-        directories = self.view.window().folders()
-        for directory in directories:
-            for dirname, _, files in self.walk(directory):
-                for file in files:
-                    fileName = dirname + os.sep + file
-                    if re.search(text, fileName):
-                        results += [fileName]
+        if text[0] == "/":
+            if os.path.exists(text):
+                results += [text]
+        else:
+            directories = self.view.window().folders()
+            for directory in directories:
+                for dirname, _, files in self.walk(directory):
+                    for file in files:
+                        fileName = dirname + os.sep + file
+                        if re.search(text, fileName):
+                            results += [fileName]
+        print(results)
         return results
 
 
